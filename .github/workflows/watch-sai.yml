@@ -30,7 +30,7 @@ jobs:
 
       # 3️⃣ 输出当前时间（北京时间）
       - name: Show current time
-        run: echo "Workflow triggered at: $(date)"
+        run: echo "Workflow triggered at:$(date)"
 
       # 4️⃣ Compare platform/broadcom/sai.mk
       - name: Compare sai.mk
