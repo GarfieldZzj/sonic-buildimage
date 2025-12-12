@@ -1,44 +1,71 @@
-# For more infomation, please visit: https://github.com/github/codeql-action
-
-name: "CodeQL"
+name: Watch SAI Version Updates
 
 on:
-  push:
-    branches:
-      - 'master'
-      - '202[0-9][0-9][0-9]'
-  pull_request_target:
-    branches:
-      - 'master'
-      - '202[0-9][0-9][0-9]'
+  schedule:
+    - cron: "0 9 * * *"   # 每天上午9点
+  workflow_dispatch:
 
 jobs:
-  analyze:
-    if: github.repository_owner == 'sonic-net'
-    name: Analyze
+  check-sai:
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [ 'python' ]
-
+    env:
+      TZ: Asia/Shanghai
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # 1️⃣ Checkout fork repository, fetch full history
+      - name: Checkout fork repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v2
-      with:
-        config-file: ./.github/codeql/codeql-config.yml
-        languages: ${{ matrix.language }}
+      # 2️⃣ Add upstream and fetch
+      - name: Add upstream and fetch
+        run: |
+          git remote remove upstream || true
+          git remote add upstream https://github.com/sonic-net/sonic-buildimage.git
+          git fetch upstream master
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v2
-      with:
-        category: "/language:${{matrix.language}}"
+      # 3️⃣ Compare platform/broadcom/sai.mk
+      - name: Compare sai.mk
+        id: diffcheck
+        run: |
+          FILE="platform/broadcom/sai.mk"
+
+          # 确认文件在 upstream/master 存在
+          if ! git ls-tree --name-only upstream/master | grep -q "$FILE"; then
+              echo "File $FILE does not exist in upstream/master"
+              echo "changed=false" >> $GITHUB_OUTPUT
+              exit 0
+          fi
+
+          # 确认文件在 origin/master 存在
+          if ! git ls-tree --name-only origin/master | grep -q "$FILE"; then
+              echo "File $FILE does not exist in origin/master"
+              echo "changed=false" >> $GITHUB_OUTPUT
+              exit 0
+          fi
+
+          git diff upstream/master:$FILE origin/master:$FILE > sai.diff || true
+
+          if [ -s sai.diff ]; then
+              echo "changed=true" >> $GITHUB_OUTPUT
+          else
+              echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 4️⃣ Create issue when changed
+      - name: Create issue when changed
+        if: steps.diffcheck.outputs.changed == 'true'
+        id: issue
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "SAI Version Updated in Upstream"
+          content-filepath: sai.diff
+          labels: sai,monitoring
+
+      # 5️⃣ Send email notification via GitHub Issue (GitHub 内置通知)
+      - name: Notify via GitHub email
+        if: steps.diffcheck.outputs.changed == 'true'
+        run: |
+          echo "GitHub will send email notification to your verified primary email for this issue."
+          echo "Diff preview:"
+          head -n 20 sai.diff
