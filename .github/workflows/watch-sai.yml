@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # 必须拉完整历史，否则 diff 会报错
+          ref: ${{ github.ref }}
 
       # 2️⃣ 添加 upstream 并 fetch
       - name: Add upstream and fetch
