@@ -2,57 +2,70 @@ name: Watch SAI Version Updates
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # 每天上午9点
+    - cron: "0 1 * * *"   # 每天 UTC 01:00 = 北京时间 09:00
   workflow_dispatch:
 
 jobs:
   check-sai:
     runs-on: ubuntu-latest
+
     env:
-      TZ: Asia/Shanghai
+      TZ: Asia/Shanghai   # 设置北京时间
+
     steps:
-      # 1️⃣ Checkout fork repository, fetch full history
+      # 1️⃣ Checkout fork repository, 拉取完整历史
       - name: Checkout fork repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # 必须拉完整历史，否则 diff 会报错
 
-      # 2️⃣ Add upstream and fetch
+      # 2️⃣ 添加 upstream 并 fetch
       - name: Add upstream and fetch
         run: |
           git remote remove upstream || true
           git remote add upstream https://github.com/sonic-net/sonic-buildimage.git
           git fetch upstream master
+          git fetch origin master
+          git checkout master
 
-      # 3️⃣ Compare platform/broadcom/sai.mk
+      # 3️⃣ 输出当前时间（北京时间）
+      - name: Show current time
+        run: echo "Workflow triggered at: $(date)"
+
+      # 4️⃣ Compare platform/broadcom/sai.mk
       - name: Compare sai.mk
         id: diffcheck
         run: |
           FILE="platform/broadcom/sai.mk"
 
-          # 确认文件在 upstream/master 存在
+          echo "Checking $FILE..."
+
+          # 文件在 upstream/master 是否存在
           if ! git ls-tree --name-only upstream/master | grep -q "$FILE"; then
-              echo "File $FILE does not exist in upstream/master"
+              echo "File $FILE not found in upstream/master"
               echo "changed=false" >> $GITHUB_OUTPUT
               exit 0
           fi
 
-          # 确认文件在 origin/master 存在
+          # 文件在 origin/master 是否存在
           if ! git ls-tree --name-only origin/master | grep -q "$FILE"; then
-              echo "File $FILE does not exist in origin/master"
+              echo "File $FILE not found in origin/master"
               echo "changed=false" >> $GITHUB_OUTPUT
               exit 0
           fi
 
+          # 执行 diff
           git diff upstream/master:$FILE origin/master:$FILE > sai.diff || true
 
           if [ -s sai.diff ]; then
+              echo "Changes detected"
               echo "changed=true" >> $GITHUB_OUTPUT
           else
+              echo "No changes detected"
               echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      # 4️⃣ Create issue when changed
+      # 5️⃣ 创建 Issue（GitHub 会自动发邮件到你的 Verified 邮箱）
       - name: Create issue when changed
         if: steps.diffcheck.outputs.changed == 'true'
         id: issue
@@ -62,10 +75,9 @@ jobs:
           content-filepath: sai.diff
           labels: sai,monitoring
 
-      # 5️⃣ Send email notification via GitHub Issue (GitHub 内置通知)
-      - name: Notify via GitHub email
+      # 6️⃣ 输出 diff 预览到日志
+      - name: Show diff preview
         if: steps.diffcheck.outputs.changed == 'true'
         run: |
-          echo "GitHub will send email notification to your verified primary email for this issue."
-          echo "Diff preview:"
+          echo "Diff preview (first 20 lines):"
           head -n 20 sai.diff
